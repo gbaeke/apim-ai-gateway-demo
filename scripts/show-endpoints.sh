@@ -6,6 +6,7 @@ RG="${RG:-rg-apim-ai-demo}"
 apim=$(az apim list -g "$RG" --query "[0].name" -o tsv)
 gateway=$(az apim show -g "$RG" -n "$apim" --query gatewayUrl -o tsv)
 ui=$(az containerapp show -g "$RG" -n ca-orchestrator --query properties.configuration.ingress.fqdn -o tsv 2>/dev/null)
+aigw=$(az resource list -g "$RG" --resource-type Microsoft.ApiManagement/aigateways --query "[0].name" -o tsv 2>/dev/null)
 agents=$(az cognitiveservices account list -g "$RG" --query "[?properties.allowProjectManagement].name | [0]" -o tsv)
 
 cat <<EOF
@@ -17,3 +18,8 @@ APIM gateway       $gateway
 Foundry portal     https://ai.azure.com  ->  account $agents  ->  project orchestrator-agent | specialist-agent
                    ->  Build > Agents > (agent) > Traces
 EOF
+if [[ -n "$aigw" ]]; then
+  aigw_host=$(az resource show -g "$RG" -n "$aigw" --resource-type Microsoft.ApiManagement/aigateways \
+    --api-version 2026-09-01-preview --query properties.frontend.defaultHostname -o tsv)
+  echo "AI Gateway tier    https://$aigw_host  (unconfigured; set it up at https://ai.gateway.azure.com)"
+fi

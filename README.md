@@ -59,6 +59,8 @@ az account set -s <subscription>
 
 Defaults are resource group `rg-apim-ai-demo` in `francecentral`. Override them with environment variables, for example `RG=my-rg LOCATION=swedencentral ./scripts/deploy.sh`.
 
+To compare with the new **AI Gateway tier (preview)**, run `AI_GATEWAY_TIER=1 ./scripts/deploy.sh` (Bicep parameter `deployAiGatewayTier`). This adds an empty `Microsoft.ApiManagement/aigateways` instance, public and without virtual network integration, in `AI_GATEWAY_LOCATION`: `swedencentral` (the default) or `eastus2`, the only preview regions, with SKU `Consumption` (Bicep parameter `aiGatewaySku`, or `Premium`). The agents don't use it. Its models, MCP servers, policies and keys are configured at [ai.gateway.azure.com](https://ai.gateway.azure.com), not in Bicep. Running the script again without the flag doesn't remove the instance; delete it yourself or run `destroy.sh`.
+
 The first run takes about 20–30 minutes, most of it creating API Management. `deploy.sh`:
 
 1. deploys the infrastructure without the container apps, because the images don't exist yet;

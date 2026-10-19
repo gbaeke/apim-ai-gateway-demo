@@ -16,6 +16,12 @@ param imageTag string = 'latest'
 @secure()
 @description('Shared secret APIM sends to the specialist; scripts/deploy.sh keeps it stable across runs.')
 param specialistGatewayKey string
+@description('Also deploy an empty AI Gateway tier (preview) instance next to Basic v2, for comparison.')
+param deployAiGatewayTier bool = false
+@description('AI Gateway tier preview regions only: swedencentral or eastus2.')
+param aiGatewayLocation string = 'swedencentral'
+@description('AI Gateway tier SKU: Consumption or Premium.')
+param aiGatewaySku string = 'Consumption'
 
 var suffix = take(uniqueString(resourceGroup().id), 6)
 var tags = { demo: 'apim-ai-gateway' }
@@ -113,6 +119,11 @@ module apim 'modules/apim.bicep' = {
   }
 }
 
+module aiGatewayTier 'modules/ai-gateway-tier.bicep' = if (deployAiGatewayTier) {
+  name: 'ai-gateway-tier'
+  params: { location: aiGatewayLocation, suffix: suffix, tags: tags, skuName: aiGatewaySku }
+}
+
 module foundryModels 'modules/foundry-models.bicep' = {
   name: 'foundry-models'
   params: {
@@ -157,6 +168,7 @@ module apps 'modules/container-apps.bicep' = if (deployApps) {
 output acrName string = acr.name
 output apimName string = apim.outputs.name
 output apimGatewayUrl string = apim.outputs.gatewayUrl
+output aiGatewayHostname string = deployAiGatewayTier ? aiGatewayTier!.outputs.hostname : ''
 output modelEndpoint string = foundryModels.outputs.endpoint
 output foundryAgentsAccount string = foundryAgents.outputs.name
 output foundryProjectEndpoints array = foundryAgents.outputs.projectEndpoints

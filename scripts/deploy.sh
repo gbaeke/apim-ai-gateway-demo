@@ -10,6 +10,9 @@ cd "$(dirname "$0")/.."
 RG="${RG:-rg-apim-ai-demo}"
 LOCATION="${LOCATION:-francecentral}"
 TAG="${TAG:-$(date +%Y%m%d%H%M%S)}"
+# AI_GATEWAY_TIER=1 also deploys an empty AI Gateway tier (preview) instance in AI_GATEWAY_LOCATION.
+AI_GATEWAY_TIER="${AI_GATEWAY_TIER:-0}"
+AI_GATEWAY_LOCATION="${AI_GATEWAY_LOCATION:-swedencentral}"
 
 for tool in az uv python3 openssl; do
   command -v "$tool" >/dev/null || { echo "Missing prerequisite: $tool"; exit 1; }
@@ -26,7 +29,8 @@ gateway_key="${gateway_key:-$(openssl rand -hex 32)}"
 
 deploy() {
   az deployment group create -g "$RG" -n main -f infra/main.bicep \
-    -p publisherEmail="$publisher_email" deployerPrincipalId="$deployer_id" specialistGatewayKey="$gateway_key" "$@" \
+    -p publisherEmail="$publisher_email" deployerPrincipalId="$deployer_id" specialistGatewayKey="$gateway_key" \
+    deployAiGatewayTier="$([[ $AI_GATEWAY_TIER == 1 ]] && echo true || echo false)" aiGatewayLocation="$AI_GATEWAY_LOCATION" "$@" \
     --query properties.outputs -o json > .deploy-outputs.json
 }
 out() { python3 -c "import json,sys; print(json.load(open('.deploy-outputs.json'))['$1']['value'])"; }
