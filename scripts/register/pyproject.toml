@@ -1,0 +1,8 @@
+[project]
+name = "register-external-agents"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = ["azure-ai-projects>=2.9.0", "azure-identity>=1.26.0"]
+
+[tool.uv]
+package = false

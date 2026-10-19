@@ -1,0 +1,49 @@
+<!--
+  Model API (Foundry, OpenAI v1 surface).
+  - Both agents may call the model, each with its own token-per-minute budget (named values, change live).
+  - Token usage is emitted as a custom metric with the calling agent as a dimension.
+  - APIM authenticates to Foundry with its own managed identity; agent tokens never reach the backend.
+-->
+<policies>
+  <inbound>
+    <base />
+    <choose>
+      <when condition="@((string)context.Variables["callerName"] == "orchestrator-agent")">
+        <llm-token-limit counter-key="orchestrator-agent" tokens-per-minute="{{orchestrator-tpm}}"
+            estimate-prompt-tokens="false"
+            remaining-tokens-header-name="x-ratelimit-remaining-tokens"
+            tokens-consumed-header-name="x-tokens-consumed" />
+      </when>
+      <when condition="@((string)context.Variables["callerName"] == "specialist-agent")">
+        <llm-token-limit counter-key="specialist-agent" tokens-per-minute="{{specialist-tpm}}"
+            estimate-prompt-tokens="false"
+            remaining-tokens-header-name="x-ratelimit-remaining-tokens"
+            tokens-consumed-header-name="x-tokens-consumed" />
+      </when>
+      <otherwise>
+        <return-response>
+          <set-status code="403" reason="Forbidden" />
+        </return-response>
+      </otherwise>
+    </choose>
+    <llm-emit-token-metric namespace="ai-gateway">
+      <dimension name="API ID" />
+      <dimension name="Caller" value="@((string)context.Variables["callerName"])" />
+    </llm-emit-token-metric>
+    <set-backend-service backend-id="foundry-models" />
+    <authentication-managed-identity resource="https://cognitiveservices.azure.com"
+        output-token-variable-name="apimToken" ignore-error="false" />
+    <set-header name="Authorization" exists-action="override">
+      <value>@("Bearer " + (string)context.Variables["apimToken"])</value>
+    </set-header>
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

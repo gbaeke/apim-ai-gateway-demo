@@ -1,0 +1,40 @@
+<!--
+  Specialist agent exposed over A2A.
+  - Only the orchestrator agent may delegate to the specialist (no self-calls, no unknown callers).
+  - The agent token is replaced by a gateway key that the specialist checks, so the specialist only
+    accepts traffic that came through APIM.
+-->
+<policies>
+  <inbound>
+    <base />
+    <choose>
+      <when condition="@((string)context.Variables["callerName"] != "orchestrator-agent")">
+        <return-response>
+          <set-status code="403" reason="Forbidden" />
+          <set-header name="Content-Type" exists-action="override">
+            <value>application/json</value>
+          </set-header>
+          <set-body>@("{\"error\":\"" + (string)context.Variables["callerName"] + " is not allowed to call the specialist agent\"}")</set-body>
+        </return-response>
+      </when>
+    </choose>
+    <rate-limit-by-key calls="{{a2a-calls-per-minute}}" renewal-period="60"
+        counter-key="@((string)context.Variables["callerName"])" />
+    <set-header name="Authorization" exists-action="delete" />
+    <set-header name="X-Gateway-Key" exists-action="override">
+      <value>{{specialist-gateway-key}}</value>
+    </set-header>
+    <set-header name="X-Calling-Agent" exists-action="override">
+      <value>@((string)context.Variables["callerName"])</value>
+    </set-header>
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

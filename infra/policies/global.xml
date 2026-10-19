@@ -1,0 +1,56 @@
+<!--
+  All-APIs policy: runs for every model, MCP and A2A call.
+  1. Only tokens issued by our tenant to one of the two agent managed identities are accepted.
+  2. The caller's client id is mapped to a friendly agent name used by every downstream policy
+     (authorization, token limits, metric dimensions, response headers).
+-->
+<policies>
+  <inbound>
+    <validate-azure-ad-token tenant-id="{{tenant-id}}" header-name="Authorization"
+        failed-validation-httpcode="401"
+        failed-validation-error-message="Caller is not an approved agent identity"
+        output-token-variable-name="jwt">
+      <client-application-ids>
+        <application-id>{{orchestrator-client-id}}</application-id>
+        <application-id>{{specialist-client-id}}</application-id>
+      </client-application-ids>
+      <audiences>
+        <audience>https://cognitiveservices.azure.com</audience>
+      </audiences>
+    </validate-azure-ad-token>
+    <set-variable name="callerAppId" value="@{
+        var jwt = (Jwt)context.Variables["jwt"];
+        return jwt.Claims.GetValueOrDefault("appid", jwt.Claims.GetValueOrDefault("azp", ""));
+    }" />
+    <set-variable name="callerName" value="@{
+        var id = (string)context.Variables["callerAppId"];
+        if (id == "{{orchestrator-client-id}}") { return "orchestrator-agent"; }
+        if (id == "{{specialist-client-id}}") { return "specialist-agent"; }
+        return "unknown";
+    }" />
+    <trace source="ai-gateway" severity="information">
+      <message>@("Authorized caller " + (string)context.Variables["callerName"])</message>
+      <metadata name="caller" value="@((string)context.Variables["callerName"])" />
+      <metadata name="caller-app-id" value="@((string)context.Variables["callerAppId"])" />
+    </trace>
+  </inbound>
+  <backend>
+    <forward-request />
+  </backend>
+  <outbound>
+    <set-header name="x-apim-caller" exists-action="override">
+      <value>@(context.Variables.GetValueOrDefault<string>("callerName", "unknown"))</value>
+    </set-header>
+    <set-header name="x-apim-request-id" exists-action="override">
+      <value>@(context.RequestId.ToString())</value>
+    </set-header>
+  </outbound>
+  <on-error>
+    <set-header name="x-apim-caller" exists-action="override">
+      <value>@(context.Variables.GetValueOrDefault<string>("callerName", "unknown"))</value>
+    </set-header>
+    <set-header name="x-apim-request-id" exists-action="override">
+      <value>@(context.RequestId.ToString())</value>
+    </set-header>
+  </on-error>
+</policies>

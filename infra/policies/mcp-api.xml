@@ -1,0 +1,35 @@
+<!--
+  Microsoft Learn MCP server (passthrough).
+  - Only the orchestrator agent may use these tools.
+  - Per-agent call rate limit.
+  - The agent's bearer token is stripped: the public MCP server needs no credentials.
+  Never touch context.Response.Body here: it would buffer the streamable HTTP response.
+-->
+<policies>
+  <inbound>
+    <base />
+    <choose>
+      <when condition="@((string)context.Variables["callerName"] != "orchestrator-agent")">
+        <return-response>
+          <set-status code="403" reason="Forbidden" />
+          <set-header name="Content-Type" exists-action="override">
+            <value>application/json</value>
+          </set-header>
+          <set-body>@("{\"error\":\"" + (string)context.Variables["callerName"] + " is not allowed to use the Microsoft Learn MCP server\"}")</set-body>
+        </return-response>
+      </when>
+    </choose>
+    <rate-limit-by-key calls="{{mcp-calls-per-minute}}" renewal-period="60"
+        counter-key="@((string)context.Variables["callerName"])" />
+    <set-header name="Authorization" exists-action="delete" />
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

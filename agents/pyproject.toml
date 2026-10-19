@@ -1,0 +1,27 @@
+[project]
+name = "apim-ai-demo-agents"
+version = "1.0.0"
+description = "Two LangChain Deep Agents that reach model, MCP and A2A only through Azure API Management"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "deepagents>=0.7.28",
+    "langchain>=1.4.6",
+    "langchain-openai>=1.7.2",
+    "langgraph>=1.2.16",
+    "langchain-mcp-adapters>=0.3.2",
+    "langchain-azure-ai[opentelemetry]>=1.2.10",
+    "a2a-sdk[http-server]>=1.2.3",
+    "azure-identity>=1.26.0",
+    "azure-monitor-opentelemetry>=1.8.11",
+    "opentelemetry-instrumentation-httpx",
+    "opentelemetry-instrumentation-fastapi",
+    "fastapi>=0.147.0",
+    "uvicorn[standard]>=0.54.0",
+    "httpx",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 120

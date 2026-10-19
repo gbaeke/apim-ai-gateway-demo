@@ -1,0 +1,48 @@
+// ===== Gateway workspace (log-apim-*) =====
+
+// 1. Who called what through the gateway, and what did APIM decide?
+ApiManagementGatewayLogs
+| where TimeGenerated > ago(1h)
+| extend caller = tostring(parse_json(TraceRecords)[0].metadata.caller)
+| project TimeGenerated, ApiId, Method, Url, ResponseCode, BackendResponseCode, LastErrorReason, caller, TotalTime
+| order by TimeGenerated desc
+
+// 2. Prompts and completions per request (LLM logs)
+ApiManagementGatewayLlmLog
+| where TimeGenerated > ago(1h)
+| where isnotempty(DeploymentName)
+| project TimeGenerated, CorrelationId, DeploymentName, PromptTokens, CompletionTokens, TotalTokens
+| order by TimeGenerated desc
+
+// 3. MCP tool calls through the gateway
+ApiManagementGatewayMCPLog
+| where TimeGenerated > ago(1h)
+| where isnotempty(ToolName)
+| summarize calls = count() by ToolName, bin(TimeGenerated, 5m)
+
+// 4. Token usage per calling agent (llm-emit-token-metric, dimension "Caller")
+AppMetrics
+| where TimeGenerated > ago(1h) and Name == "Total Tokens"
+| summarize tokens = sum(Sum) by caller = tostring(Properties["Caller"]), bin(TimeGenerated, 5m)
+| render columnchart
+
+// 5. Throttled or refused calls by reason
+ApiManagementGatewayLogs
+| where TimeGenerated > ago(1h) and ResponseCode in (401, 403, 429)
+| summarize count() by ApiId, ResponseCode, LastErrorReason
+
+// ===== Agents workspace (log-agents-*) =====
+
+// 6. GenAI spans per agent (what Foundry's tracing view is built on)
+AppDependencies
+| where TimeGenerated > ago(1h)
+| extend op = tostring(Properties["gen_ai.operation.name"]), agent = AppRoleName
+| where isnotempty(op)
+| summarize spans = count(), p50_ms = percentile(DurationMs, 50) by agent, op
+
+// 7. One end-to-end conversation turn: orchestrator -> APIM -> specialist (same OperationId).
+//    Take an OperationId from query 6 and look it up in both workspaces.
+union AppRequests, AppDependencies
+| where OperationId == "<operation id>"
+| project TimeGenerated, AppRoleName, Type, Name, DurationMs, Success
+| order by TimeGenerated asc
