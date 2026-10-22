@@ -12,6 +12,8 @@ param orchestratorClientId string
 param specialistClientId string
 @secure()
 param specialistGatewayKey string
+@description('Identity of the knob panel in the orchestrator UI: may read and change named values only.')
+param gatewayAdminPrincipalId string
 param lawId string
 param appInsightsName string
 
@@ -47,6 +49,10 @@ var namedValues = {
   // One MCP tool call is ~5 HTTP requests (initialize, initialized, tools/call, GET, DELETE).
   'mcp-calls-per-minute': '300'
   'a2a-calls-per-minute': '20'
+  // Comma-separated agent names; 'none' allows or blocks nothing.
+  'mcp-allowed-callers': 'orchestrator-agent'
+  'a2a-allowed-callers': 'orchestrator-agent'
+  'mcp-blocked-tools': 'none'
 }
 
 resource nv 'Microsoft.ApiManagement/service/namedValues@2024-06-01-preview' = [
@@ -67,6 +73,36 @@ resource nvGatewayKey 'Microsoft.ApiManagement/service/namedValues@2024-06-01-pr
     displayName: 'specialist-gateway-key'
     value: specialistGatewayKey
     secret: true
+  }
+}
+
+// Least privilege for the knob panel: named values on this instance, nothing else (no policies,
+// APIs, keys or backends).
+resource namedValueEditor 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
+  name: guid(apim.id, 'named-value-editor')
+  properties: {
+    roleName: 'APIM named value editor (${apim.name})'
+    description: 'Read and change the named values (policy knobs) of ${apim.name}.'
+    type: 'CustomRole'
+    permissions: [
+      {
+        actions: [
+          'Microsoft.ApiManagement/service/namedValues/read'
+          'Microsoft.ApiManagement/service/namedValues/write'
+        ]
+      }
+    ]
+    assignableScopes: [resourceGroup().id]
+  }
+}
+
+resource gatewayAdminEditsNamedValues 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: apim
+  name: guid(apim.id, gatewayAdminPrincipalId, namedValueEditor.id)
+  properties: {
+    principalId: gatewayAdminPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: namedValueEditor.id
   }
 }
 
@@ -333,6 +369,7 @@ resource a2aPolicy 'Microsoft.ApiManagement/service/apis/policies@2025-09-01-pre
   }
 }
 
+output id string = apim.id
 output name string = apim.name
 output gatewayUrl string = apim.properties.gatewayUrl
 output principalId string = apim.identity.principalId

@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 
 from aigateway.auth import GatewayAuth
+from aigateway.errors import response_reason
 
 Sink = Callable[[dict[str, Any]], None]
 _sink: ContextVar[Sink | None] = ContextVar("gateway_activity_sink", default=None)
@@ -24,6 +25,7 @@ _APIM_HEADERS = {
     "x-apim-request-id": "requestId",
     "x-ratelimit-remaining-tokens": "remainingTokens",
     "x-tokens-consumed": "tokensConsumed",
+    "x-apim-blocked": "blocked",
 }
 
 
@@ -60,6 +62,10 @@ async def _on_response(response: httpx.Response) -> None:
     for header, key in _APIM_HEADERS.items():
         if header in response.headers:
             event[key] = response.headers[header]
+    if response.status_code >= 400:
+        await response.aread()  # small error body; also lets callers read why APIM refused
+        if reason := response_reason(response):
+            event["reason"] = reason
     sink(event)
 
 

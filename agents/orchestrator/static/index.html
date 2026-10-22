@@ -76,6 +76,14 @@
       </section>
 
       <aside class="panel" id="panel">
+        <details class="knobs" id="knobs" hidden open>
+          <summary>
+            <h3>Policy knobs</h3>
+            <span class="knobs-note" id="knobs-note">APIM named values · applied within seconds</span>
+            <button class="ghost small" id="knobs-reset" type="button" title="Set every knob back to its default">Reset all</button>
+          </summary>
+          <div class="knob-groups" id="knob-groups"></div>
+        </details>
         <div class="panel-head">
           <h3>Gateway activity</h3>
           <p>Calls this agent made through APIM, as seen in the response headers APIM adds.</p>

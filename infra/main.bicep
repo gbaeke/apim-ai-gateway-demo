@@ -42,6 +42,14 @@ resource specialistIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@20
   tags: tags
 }
 
+// The knob panel in the orchestrator UI changes APIM named values with this identity. It is not an
+// agent identity: APIM never accepts it, and the agents' identities never get management rights.
+resource gatewayAdminIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = {
+  name: 'id-gateway-admin'
+  location: location
+  tags: tags
+}
+
 resource acr 'Microsoft.ContainerRegistry/registries@2025-04-01' = {
   name: 'acr${suffix}${uniqueString(resourceGroup().id, 'acr')}'
   location: location
@@ -114,6 +122,7 @@ module apim 'modules/apim.bicep' = {
     orchestratorClientId: orchestratorIdentity.properties.clientId
     specialistClientId: specialistIdentity.properties.clientId
     specialistGatewayKey: specialistGatewayKey
+    gatewayAdminPrincipalId: gatewayAdminIdentity.properties.principalId
     lawId: monitoring.outputs.lawApimId
     appInsightsName: monitoring.outputs.appiApimName
   }
@@ -160,6 +169,9 @@ module apps 'modules/container-apps.bicep' = if (deployApps) {
     specialistIdentityId: specialistIdentity.id
     specialistClientId: specialistIdentity.properties.clientId
     specialistGatewayKey: specialistGatewayKey
+    gatewayAdminIdentityId: gatewayAdminIdentity.id
+    gatewayAdminClientId: gatewayAdminIdentity.properties.clientId
+    apimId: apim.outputs.id
     orchestratorImage: '${acr.properties.loginServer}/orchestrator-agent:${imageTag}'
     specialistImage: '${acr.properties.loginServer}/specialist-agent:${imageTag}'
   }

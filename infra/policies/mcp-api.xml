@@ -1,6 +1,8 @@
 <!--
   Microsoft Learn MCP server (passthrough).
-  - Only the orchestrator agent may use these tools.
+  - Only the agents in {{mcp-allowed-callers}} may use these tools (comma-separated, change live).
+  - Tools in {{mcp-blocked-tools}} are refused with an MCP tool error, so the agent sees the
+    refusal and carries on without that tool ("none" blocks nothing).
   - Per-agent call rate limit.
   - The agent's bearer token is stripped: the public MCP server needs no credentials.
   Never touch context.Response.Body here: it would buffer the streamable HTTP response.
@@ -9,13 +11,51 @@
   <inbound>
     <base />
     <choose>
-      <when condition="@((string)context.Variables["callerName"] != "orchestrator-agent")">
+      <when condition="@{
+          var allowed = ",{{mcp-allowed-callers}},".Replace(" ", "");
+          return !allowed.Contains("," + (string)context.Variables["callerName"] + ",");
+      }">
         <return-response>
           <set-status code="403" reason="Forbidden" />
           <set-header name="Content-Type" exists-action="override">
             <value>application/json</value>
           </set-header>
           <set-body>@("{\"error\":\"" + (string)context.Variables["callerName"] + " is not allowed to use the Microsoft Learn MCP server\"}")</set-body>
+        </return-response>
+      </when>
+    </choose>
+    <set-variable name="mcpTool" value="@{
+        if (context.Request.Method != "POST") { return ""; }
+        var body = context.Request.Body.As<JObject>(preserveContent: true);
+        return (string)body["method"] == "tools/call" ? (string)body["params"]["name"] : "";
+    }" />
+    <choose>
+      <when condition="@{
+          var tool = (string)context.Variables["mcpTool"];
+          return ",{{mcp-blocked-tools}},".Replace(" ", "").Contains("," + tool + ",");
+      }">
+        <!-- A JSON-RPC result with isError: the call succeeds at the protocol level, the tool fails. -->
+        <return-response>
+          <set-status code="200" reason="OK" />
+          <set-header name="Content-Type" exists-action="override">
+            <value>application/json</value>
+          </set-header>
+          <set-header name="x-apim-blocked" exists-action="override">
+            <value>@((string)context.Variables["mcpTool"])</value>
+          </set-header>
+          <set-body>@{
+              var body = context.Request.Body.As<JObject>(preserveContent: true);
+              var text = "API Management policy blocks the tool '" + (string)context.Variables["mcpTool"]
+                  + "' for " + (string)context.Variables["callerName"] + ".";
+              return new JObject(
+                  new JProperty("jsonrpc", "2.0"),
+                  new JProperty("id", body["id"]),
+                  new JProperty("result", new JObject(
+                      new JProperty("content", new JArray(new JObject(
+                          new JProperty("type", "text"),
+                          new JProperty("text", text)))),
+                      new JProperty("isError", true)))).ToString();
+          }</set-body>
         </return-response>
       </when>
     </choose>

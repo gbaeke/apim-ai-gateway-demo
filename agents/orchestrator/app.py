@@ -24,7 +24,7 @@ from aigateway import telemetry
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 telemetry.setup()  # before any httpx client exists
 
-from fastapi import FastAPI  # noqa: E402
+from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.responses import FileResponse, StreamingResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage  # noqa: E402
@@ -32,7 +32,9 @@ from pydantic import BaseModel  # noqa: E402
 
 from aigateway import activity  # noqa: E402
 from aigateway.config import settings  # noqa: E402
+from aigateway.errors import gateway_error  # noqa: E402
 import agent as agent_module  # noqa: E402
+import knobs  # noqa: E402
 from agent import build_agent  # noqa: E402
 
 log = logging.getLogger("orchestrator")
@@ -90,12 +92,7 @@ def _sse(event: str, data: dict) -> str:
 
 
 def _describe_error(exc: Exception) -> dict:
-    status = getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
-    message = str(exc)
-    if status == 429:
-        message = "APIM throttled this agent (token or request limit reached). Try again in a minute."
-    elif status in (401, 403):
-        message = f"APIM rejected the call ({status}): {exc}"
+    status, message = gateway_error(exc)
     return {"status": status, "message": message[:600]}
 
 
@@ -174,6 +171,36 @@ async def info():
             "a2a": os.environ.get("SPECIALIST_A2A_URL", ""),
         },
     }
+
+
+class KnobUpdate(BaseModel):
+    value: str
+
+
+@app.get("/api/knobs")
+async def get_knobs():
+    if not knobs.enabled():
+        return {"enabled": False, "knobs": []}
+    try:
+        return {"enabled": True, "knobs": await knobs.read_all()}
+    except Exception as exc:
+        log.exception("Reading the policy knobs failed")
+        raise HTTPException(502, f"Could not read the APIM named values: {exc}") from exc
+
+
+@app.put("/api/knobs/{name}")
+async def set_knob(name: str, update: KnobUpdate):
+    if not knobs.enabled():
+        raise HTTPException(404, "Policy knobs are not configured (APIM_RESOURCE_ID is not set)")
+    try:
+        value = await knobs.write(name, update.value)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        log.exception("Changing %s failed", name)
+        raise HTTPException(502, f"Could not change {name}: {exc}") from exc
+    log.info("Policy knob %s set to %s", name, value)
+    return {"name": name, "value": value}
 
 
 @app.get("/healthz", include_in_schema=False)

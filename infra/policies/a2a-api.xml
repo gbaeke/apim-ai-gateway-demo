@@ -1,6 +1,7 @@
 <!--
   Specialist agent exposed over A2A.
-  - Only the orchestrator agent may delegate to the specialist (no self-calls, no unknown callers).
+  - Only the agents in {{a2a-allowed-callers}} may delegate to the specialist (comma-separated,
+    change live; the default, orchestrator-agent, rules out self-calls and unknown callers).
   - The agent token is replaced by a gateway key that the specialist checks, so the specialist only
     accepts traffic that came through APIM.
 -->
@@ -8,7 +9,10 @@
   <inbound>
     <base />
     <choose>
-      <when condition="@((string)context.Variables["callerName"] != "orchestrator-agent")">
+      <when condition="@{
+          var allowed = ",{{a2a-allowed-callers}},".Replace(" ", "");
+          return !allowed.Contains("," + (string)context.Variables["callerName"] + ",");
+      }">
         <return-response>
           <set-status code="403" reason="Forbidden" />
           <set-header name="Content-Type" exists-action="override">

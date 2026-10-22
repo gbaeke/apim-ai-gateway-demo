@@ -41,6 +41,105 @@ $("new-chat").addEventListener("click", () => {
 });
 $("toggle-panel").addEventListener("click", () => $("panel").classList.toggle("open"));
 
+// ---------- policy knobs (APIM named values, changed through the gateway admin identity) ----------
+const KNOB_TAG = { Model: "model", MCP: "mcp", A2A: "a2a" };
+let knobList = [];
+
+function knobNote(text, isError = false) {
+  $("knobs-note").textContent = text;
+  $("knobs-note").classList.toggle("err", isError);
+}
+
+async function loadKnobs() {
+  try {
+    const res = await fetch("/api/knobs");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    if (!data.enabled) return;
+    knobList = data.knobs;
+    $("knobs").hidden = false;
+    renderKnobs();
+  } catch (err) {
+    $("knobs").hidden = false;
+    knobNote(`Knobs unavailable: ${err.message}`, true);
+  }
+}
+
+function renderKnobs() {
+  const groups = $("knob-groups");
+  groups.innerHTML = "";
+  for (const group of [...new Set(knobList.map((k) => k.group))]) {
+    const box = el("div", "knob-group", `<span class="tag ${KNOB_TAG[group] || ""}">${esc(group)}</span>`);
+    for (const knob of knobList.filter((k) => k.group === group)) box.append(knobRow(knob));
+    groups.append(box);
+  }
+}
+
+function knobRow(knob) {
+  const row = el("div", "knob" + (knob.value !== knob.default ? " changed" : ""));
+  row.innerHTML = `<div class="knob-head"><span>${esc(knob.label)}</span><span class="v" title="${esc(knob.name)}">${esc(knob.value ?? "missing")}</span></div>`;
+  const ctl = el("div", "knob-ctl");
+  if (knob.kind === "number") {
+    for (const preset of knob.presets) {
+      const b = el("button", "opt" + (preset === knob.value ? " on" : ""), Number(preset).toLocaleString());
+      b.type = "button";
+      b.title = preset === knob.default ? "default" : "";
+      b.addEventListener("click", () => setKnob(knob, preset, row));
+      ctl.append(b);
+    }
+    const custom = el("input");
+    custom.type = "number"; custom.min = "1"; custom.placeholder = "custom";
+    custom.addEventListener("keydown", (e) => { if (e.key === "Enter" && custom.value) setKnob(knob, custom.value, row); });
+    ctl.append(custom);
+  } else {
+    // Allow-lists show who may pass; block-lists show what is refused.
+    const current = new Set((knob.value || "").split(",").filter((v) => v && v !== "none"));
+    const deny = knob.name.includes("blocked");
+    for (const option of knob.options) {
+      const b = el("button", "opt" + (current.has(option) ? " on" : "") + (deny ? " deny" : ""), esc(option));
+      b.type = "button";
+      b.addEventListener("click", () => {
+        const next = new Set(current);
+        next.has(option) ? next.delete(option) : next.add(option);
+        setKnob(knob, [...next].join(",") || "none", row);
+      });
+      ctl.append(b);
+    }
+  }
+  row.append(ctl);
+  return row;
+}
+
+async function setKnob(knob, value, row) {
+  row.classList.add("busy");
+  knobNote(`Applying ${knob.name} = ${value}…`);
+  try {
+    const res = await fetch(`/api/knobs/${encodeURIComponent(knob.name)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    knob.value = data.value;
+    knobNote(`${knob.name} = ${data.value} · policies pick it up within seconds`);
+  } catch (err) {
+    knobNote(err.message, true);
+  } finally {
+    row.classList.remove("busy");
+  }
+  renderKnobs();
+}
+
+$("knobs-reset").addEventListener("click", async (e) => {
+  e.preventDefault();  // a button inside <summary> would also toggle the section
+  const changed = knobList.filter((k) => k.value !== k.default);
+  knobNote(changed.length ? "Resetting…" : "All knobs are at their defaults");
+  for (const knob of changed) {
+    await setKnob(knob, knob.default, $("knob-groups"));
+  }
+});
+
+loadKnobs();
+
 function autosize() {
   input.style.height = "auto";
   input.style.height = Math.min(input.scrollHeight, 200) + "px";
@@ -104,12 +203,21 @@ function finishStep(view, result) {
   if (result.preview) step.append(el("pre", "", esc(result.preview) + (result.preview.length >= 400 ? "…" : "")));
 }
 
+// Steps still running when the turn ends (for example after an error) will never finish.
+function stopSteps(view) {
+  for (const step of Object.values(view.stepById)) {
+    const state = step.querySelector(".state");
+    if (state.querySelector(".spinner")) state.innerHTML = '<span class="bad">✕ stopped</span>';
+  }
+}
+
 function addCall(call) {
   callsEl.querySelector(".empty")?.remove();
   // MCP streamable HTTP: the client probes GET (optional SSE stream) and sends DELETE (end session);
   // stateless servers such as Microsoft Learn answer 405. That is protocol housekeeping, not a block.
   const housekeeping = call.kind === "mcp" && call.status === 405 && (call.method === "GET" || call.method === "DELETE");
-  const blocked = call.status >= 400 && !housekeeping;
+  // A blocked MCP tool comes back as 200 with an MCP tool error; APIM flags it with x-apim-blocked.
+  const blocked = (call.status >= 400 && !housekeeping) || Boolean(call.blocked);
   if (counts[call.kind] !== undefined) counts[call.kind]++;
   if (blocked) counts.blocked++;
   for (const k of Object.keys(counts)) $(`stat-${k}`).textContent = counts[k];
@@ -120,6 +228,8 @@ function addCall(call) {
   if (call.caller) meta.push(`<span>caller <b>${esc(call.caller)}</b></span>`);
   if (call.tokensConsumed) meta.push(`<span>tokens <b>${esc(call.tokensConsumed)}</b></span>`);
   if (call.remainingTokens) meta.push(`<span>budget left <b>${esc(call.remainingTokens)}</b></span>`);
+  if (call.blocked) meta.push(`<span>blocked <b>${esc(call.blocked)}</b></span>`);
+  if (call.reason) meta.push(`<span title="${esc(call.reason)}">${esc(call.reason)}</span>`);
   if (call.requestId) meta.push(`<span title="APIM request id">id <b>${esc(call.requestId.slice(0, 8))}</b></span>`);
   item.innerHTML = `<div class="call-top"><span class="tag ${call.kind}">${KIND_LABEL[call.kind] || call.kind}</span>
       <span class="path" title="${esc(call.path)}">${esc(call.method)} ${esc(call.path)}</span>
@@ -167,6 +277,7 @@ async function send(text) {
   } catch (err) {
     view.content.insertAdjacentHTML("beforeend", `<div class="error">Connection lost: ${esc(err.message)}</div>`);
   } finally {
+    stopSteps(view);
     view.content.classList.remove("cursor");
     if (!view.text && !view.content.querySelector(".error")) view.content.innerHTML = '<p style="color:var(--muted)">No answer produced.</p>';
     busy = false; sendBtn.disabled = false; input.focus();

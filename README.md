@@ -76,7 +76,7 @@ Run `deploy.sh` again to apply any change; it is idempotent. For code-only chang
 
 The deployment creates billable resources. The biggest costs are API Management Basic v2 (hourly) and model tokens.
 
-The orchestrator UI has a public URL and **no sign-in**, so anyone with the URL can use it, within its token budget. Remove the deployment when you're done, or add Container Apps built-in authentication.
+The orchestrator UI has a public URL and **no sign-in**, so anyone with the URL can use it, within its token budget, and can turn the policy knobs in its gateway panel. Remove the deployment when you're done, or add Container Apps built-in authentication.
 
 ## Remove
 
@@ -111,6 +111,23 @@ About 15 minutes. Get the URLs with `./scripts/show-endpoints.sh`.
    ```
    The other knobs work the same way: `orchestrator-tpm`, `mcp-calls-per-minute` and `a2a-calls-per-minute`.
 
+   Access works the same way. These knobs take comma-separated names, and `none` stands for nobody or nothing:
+   ```bash
+   # Block one MCP tool. APIM answers the call with an MCP tool error, so the orchestrator sees
+   # the refusal and works around it (for example by using microsoft_docs_fetch instead).
+   ./scripts/set-policy-knob.sh mcp-blocked-tools microsoft_docs_search
+   ./scripts/set-policy-knob.sh mcp-blocked-tools none                         # restore
+
+   # Revoke delegation. The A2A call gets a 403, and the orchestrator says it can't reach the reviewer.
+   ./scripts/set-policy-knob.sh a2a-allowed-callers none
+   ./scripts/set-policy-knob.sh a2a-allowed-callers orchestrator-agent         # restore
+   ```
+   You can also turn the knobs in the UI: **Policy knobs** at the top of the gateway panel, or `./scripts/knobs.sh` in a terminal. Both show the current values, offer demo presets and reset everything to the defaults.
+
+   The UI changes the named values through Azure Resource Manager with a separate identity, `id-gateway-admin`. A custom role lets it read and write the named values of this APIM instance and nothing else. The agent's own identity has no management rights, and the model has no tool that reaches the knobs, so the agent cannot loosen its own limits.
+
+   `mcp-allowed-callers` revokes the whole MCP server. The MCP client treats that 403 as a transport failure, so the chat turn ends with an error banner instead of a graceful answer.
+
 6. **Gateway observability.**
    - APIM → Monitoring → **Analytics → Language models**: token usage at a glance.
    - Log Analytics workspace `log-apim-*`: run the queries in `infra/queries.kql`. They show which agent called which API and what APIM decided (200, 401, 403, 429); prompts and completions (`ApiManagementGatewayLlmLog`); MCP tool calls (`ApiManagementGatewayMCPLog`); and tokens per agent.
@@ -120,7 +137,7 @@ About 15 minutes. Get the URLs with `./scripts/show-endpoints.sh`.
    - Search for `POST /api/chat` and open a trace. One trajectory shows the orchestrator's `invoke_agent`, `chat` and `execute_tool` spans, its calls through APIM, and the specialist's spans nested inside, because W3C trace context flows through the gateway.
    - Spans take 2–5 minutes to appear.
 
-Talking point: Deep Agents' built-in *general-purpose* subagent runs inside the orchestrator's process, so APIM never sees it. The specialist is a separate workload with its own identity, token budget and rights, governed by the gateway.
+Talking point: the orchestrator has Deep Agents' built-in *general-purpose* subagent (the `task` tool) turned off, so every step runs in its own loop and shows up in the UI. The specialist is a separate workload with its own identity, token budget and rights, governed by the gateway.
 
 ## Design notes
 

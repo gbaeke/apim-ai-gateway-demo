@@ -13,13 +13,15 @@ import httpx
 from a2a.client import A2ACardResolver, A2AClientError, ClientConfig, create_client
 from a2a.helpers import get_artifact_text, get_message_text, new_text_message
 from a2a.types import Role, SendMessageRequest, TaskState
-from deepagents import create_deep_agent
-from langchain_core.tools import tool
+from deepagents import GeneralPurposeSubagentProfile, HarnessProfile, create_deep_agent, register_harness_profile
+from langchain_core.tools import BaseTool, ToolException, tool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.checkpoint.memory import InMemorySaver
 
 from aigateway import activity
 from aigateway.auth import GatewayAuth
+from aigateway.config import settings
+from aigateway.errors import gateway_error
 from aigateway.model import chat_model
 
 log = logging.getLogger(__name__)
@@ -55,10 +57,13 @@ async def ask_well_architected_reviewer(solution_description: str) -> str:
                     parts.append(get_artifact_text(event.artifact_update.artifact))
             await client.close()
     except (httpx.HTTPError, A2AClientError) as exc:
-        # Let the model explain the failure (for example an APIM 403 or 429) instead of aborting the turn.
+        # A failed tool result the model can explain (for example an APIM 403 or 429), not an aborted turn.
         log.warning("Specialist call failed: %s", exc)
-        return f"The Well-Architected reviewer could not be reached through the gateway: {exc}"
+        raise ToolException(f"The Well-Architected reviewer could not be reached: {gateway_error(exc)[1]}") from exc
     return "\n\n".join(p for p in parts if p) or "The reviewer returned no content."
+
+
+ask_well_architected_reviewer.handle_tool_error = True  # a ToolException becomes a failed tool result
 
 
 SYSTEM_PROMPT = """You are **Azure Architect Copilot**, an assistant for cloud architects.
@@ -75,8 +80,45 @@ Tools:
   asks for a review, an assessment, risks or improvements of a design. Send it a self-contained
   description of the design.
 
+If a tool fails because API Management denied or throttled it, do not call it again in this turn:
+tell the user which tool the gateway refused and why, and answer as well as you can without it,
+saying clearly what is not grounded.
+
 Plan multi-step work with your todo list. Answer in clear Markdown, keep it concise, and cite
 the Learn pages you used as links."""
+
+
+def _gateway_failures_as_tool_errors(mcp_tool: BaseTool) -> BaseTool:
+    """An APIM refusal of the MCP server (403, 429) fails that tool call instead of the whole turn."""
+    call_tool, handle_mcp_error = mcp_tool.coroutine, mcp_tool.handle_tool_error
+
+    async def guarded(*args, **kwargs):
+        try:
+            return await call_tool(*args, **kwargs)
+        except ToolException:
+            raise
+        except Exception as exc:
+            log.warning("MCP call %s failed: %s", mcp_tool.name, exc)
+            raise ToolException(f"The Microsoft Learn MCP server could not be used: {gateway_error(exc)[1]}") from exc
+
+    def handle(error: ToolException):
+        if not callable(handle_mcp_error):
+            return str(error)
+        try:
+            return handle_mcp_error(error)  # MCP tool errors (isError results) keep their content
+        except ToolException:
+            return str(error)
+
+    mcp_tool.coroutine, mcp_tool.handle_tool_error = guarded, handle
+    return mcp_tool
+
+
+# No `task` tool: Deep Agents' general-purpose subagent would run docs searches out of sight of the
+# UI, in a nested loop. Every step stays in the orchestrator's own loop instead.
+register_harness_profile(
+    f"openai:{settings.model}",
+    HarnessProfile(general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False)),
+)
 
 
 async def build_agent():
@@ -90,7 +132,7 @@ async def build_agent():
             }
         }
     )
-    mcp_tools = await mcp.get_tools()
+    mcp_tools = [_gateway_failures_as_tool_errors(t) for t in await mcp.get_tools()]
     log.info("Loaded %d MCP tools via APIM: %s", len(mcp_tools), [t.name for t in mcp_tools])
 
     global TOOL_NAMES

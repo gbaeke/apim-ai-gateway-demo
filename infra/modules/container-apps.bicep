@@ -14,6 +14,10 @@ param specialistIdentityId string
 param specialistClientId string
 @secure()
 param specialistGatewayKey string
+@description('Identity the orchestrator UI uses to turn the APIM policy knobs; the agent never uses it.')
+param gatewayAdminIdentityId string
+param gatewayAdminClientId string
+param apimId string
 param orchestratorImage string
 param specialistImage string
 
@@ -81,7 +85,7 @@ resource orchestrator 'Microsoft.App/containerApps@2026-01-01' = {
   tags: union(tags, { 'azd-service-name': 'orchestrator' })
   identity: {
     type: 'UserAssigned'
-    userAssignedIdentities: { '${orchestratorIdentityId}': {} }
+    userAssignedIdentities: { '${orchestratorIdentityId}': {}, '${gatewayAdminIdentityId}': {} }
   }
   properties: {
     environmentId: env.id
@@ -109,6 +113,8 @@ resource orchestrator 'Microsoft.App/containerApps@2026-01-01' = {
             { name: 'AGENT_ID', value: 'orchestrator-agent' }
             { name: 'MCP_URL', value: '${apimGatewayUrl}/mslearn/mcp' }
             { name: 'SPECIALIST_A2A_URL', value: '${apimGatewayUrl}/specialist' }
+            { name: 'GATEWAY_ADMIN_CLIENT_ID', value: gatewayAdminClientId }
+            { name: 'APIM_RESOURCE_ID', value: apimId }
           ])
           probes: [
             { type: 'Readiness', httpGet: { path: '/healthz', port: 8000 } }
