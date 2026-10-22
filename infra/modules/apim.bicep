@@ -76,19 +76,23 @@ resource nvGatewayKey 'Microsoft.ApiManagement/service/namedValues@2024-06-01-pr
   }
 }
 
-// Least privilege for the knob panel: named values on this instance, nothing else (no policies,
-// APIs, keys or backends).
+// Least privilege for the knob panel and the gateway map: change named values, read APIs, policies
+// and backends. It cannot change policies, APIs, keys or backends.
 resource namedValueEditor 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
   name: guid(apim.id, 'named-value-editor')
   properties: {
     roleName: 'APIM named value editor (${apim.name})'
-    description: 'Read and change the named values (policy knobs) of ${apim.name}.'
+    description: 'Change the named values (policy knobs) of ${apim.name} and read its APIs, policies and backends.'
     type: 'CustomRole'
     permissions: [
       {
         actions: [
           'Microsoft.ApiManagement/service/namedValues/read'
           'Microsoft.ApiManagement/service/namedValues/write'
+          'Microsoft.ApiManagement/service/apis/read'
+          'Microsoft.ApiManagement/service/apis/policies/read'
+          'Microsoft.ApiManagement/service/policies/read'
+          'Microsoft.ApiManagement/service/backends/read'
         ]
       }
     ]

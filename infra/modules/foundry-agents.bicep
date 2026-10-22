@@ -9,6 +9,7 @@ param deployerPrincipalId string
 
 var azureAIUser = '53ca6127-db72-4b80-b1b0-d745d6d5456d'
 var logAnalyticsReader = '73c42c96-874c-492b-b04d-ab87d138a893'
+var cognitiveServicesOpenAIUser = '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
 
 resource appInsights 'Microsoft.Insights/components@2020-02-02' existing = {
   name: appInsightsName
@@ -73,6 +74,20 @@ resource projectsReadTraces 'Microsoft.Authorization/roleAssignments@2022-04-01'
       principalId: projects[i].identity.principalId
       principalType: 'ServicePrincipal'
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', logAnalyticsReader)
+    }
+  }
+]
+
+// Evaluations in a project (e.g. GroundednessEvaluator) call the judge model deployed on this
+// account as the project's identity.
+resource projectsCallModels 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
+  for (agent, i) in agentNames: {
+    scope: account
+    name: guid(account.id, agent, cognitiveServicesOpenAIUser)
+    properties: {
+      principalId: projects[i].identity.principalId
+      principalType: 'ServicePrincipal'
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', cognitiveServicesOpenAIUser)
     }
   }
 ]

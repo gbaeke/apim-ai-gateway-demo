@@ -5,6 +5,7 @@ POST /api/chat streams Server-Sent Events:
   tool      a tool call starting (MCP docs tool, A2A delegation, or a Deep Agents built-in)
   result    a tool call finishing
   todos     the agent's current plan
+  gateway-start  a call to APIM leaving the agent (kind, path); paired with its gateway event by callId
   gateway   one call that went through APIM (kind, status, latency, caller, token budget)
   error     something failed (for example an APIM 429 or 403)
   done      end of the turn
@@ -34,6 +35,7 @@ from aigateway import activity  # noqa: E402
 from aigateway.config import settings  # noqa: E402
 from aigateway.errors import gateway_error  # noqa: E402
 import agent as agent_module  # noqa: E402
+import gateway_map  # noqa: E402
 import knobs  # noqa: E402
 from agent import build_agent  # noqa: E402
 
@@ -68,6 +70,15 @@ app = FastAPI(title="Azure Architect Copilot", lifespan=lifespan, docs_url=None,
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
+@app.middleware("http")
+async def revalidate_static(request, call_next):
+    # Browsers revalidate the UI files (cheap, via ETag), so a redeploy never shows a stale mix.
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 class ChatRequest(BaseModel):
     message: str
     conversation_id: str | None = None
@@ -98,7 +109,7 @@ def _describe_error(exc: Exception) -> dict:
 
 async def _run_turn(request: ChatRequest, conversation_id: str, queue: asyncio.Queue) -> None:
     """Runs one agent turn and pushes UI events onto ``queue``; gateway calls are captured too."""
-    sink_token = activity.set_sink(lambda call: queue.put_nowait(("gateway", call)))
+    sink_token = activity.set_sink(lambda call: queue.put_nowait(("gateway-start" if call.get("phase") == "start" else "gateway", call)))
     try:
         agent = await get_agent()
         config = {
@@ -171,6 +182,17 @@ async def info():
             "a2a": os.environ.get("SPECIALIST_A2A_URL", ""),
         },
     }
+
+
+@app.get("/api/gateway/map")
+async def get_gateway_map():
+    if not knobs.enabled():
+        return {"enabled": False}
+    try:
+        return {"enabled": True, **await gateway_map.build()}
+    except Exception as exc:
+        log.exception("Reading the gateway configuration failed")
+        raise HTTPException(502, f"Could not read the APIM configuration: {exc}") from exc
 
 
 class KnobUpdate(BaseModel):

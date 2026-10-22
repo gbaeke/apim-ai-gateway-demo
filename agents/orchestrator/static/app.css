@@ -25,6 +25,13 @@
   --border: #dde3ee;
   --text: #182033;
   --muted: #5f6b80;
+  /* Deeper accents: the dark theme's brights wash out on white (and on a projector). */
+  --accent: #3b6cf0;
+  --accent-2: #7a55f0;
+  --model: #0b7fd1;
+  --mcp: #0f9b63;
+  --a2a: #c27803;
+  --danger: #d9364a;
   color-scheme: light;
 }
 
@@ -37,6 +44,12 @@
     --border: #dde3ee;
     --text: #182033;
     --muted: #5f6b80;
+    --accent: #3b6cf0;
+    --accent-2: #7a55f0;
+    --model: #0b7fd1;
+    --mcp: #0f9b63;
+    --a2a: #c27803;
+    --danger: #d9364a;
     color-scheme: light;
   }
 }
@@ -82,6 +95,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .ghost:hover { border-color: var(--accent); }
 .ghost.icon { padding: 7px; display: none; }
+.ghost.theme { padding: 7px; }
+.ghost.theme .moon { display: none; }
+:root[data-theme="light"] .ghost.theme .sun { display: none; }
+:root[data-theme="light"] .ghost.theme .moon { display: block; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .ghost.theme .sun { display: none; }
+  :root:not([data-theme="dark"]) .ghost.theme .moon { display: block; }
+}
 
 /* ---------- layout ---------- */
 .layout { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 380px; min-height: 0; }
