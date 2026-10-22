@@ -137,6 +137,16 @@ About 15 minutes. Get the URLs with `./scripts/show-endpoints.sh`.
    - Search for `POST /api/chat` and open a trace. One trajectory shows the orchestrator's `invoke_agent`, `chat` and `execute_tool` spans, its calls through APIM, and the specialist's spans nested inside, because W3C trace context flows through the gateway.
    - Spans take 2–5 minutes to appear.
 
+8. **The gateway map.** Open the *Gateway map* tab. It reads the policies, APIs, backends and named values live from APIM and draws them left to right: callers, the global policy, one lane per API, backends.
+   - *View as* `specialist` or `unknown caller` shows where each caller is refused (403 at the caller gate, 401 at token validation).
+   - Click a step to see the policy XML behind it, with the step's lines highlighted, named values resolved and the knob it reads.
+   - Ask a question from the map tab: each call lights up its route while it is in flight, and a refused call flashes its status on the step that stopped it.
+   - The sun/moon button switches to light mode, which reads better on a projector.
+
+   The map reads APIM with the same `id-gateway-admin` identity as the knobs; its role adds read-only access to APIs, policies and backends.
+
+9. **Evaluations in Foundry.** Scheduled evaluations need traces to score. `./scripts/traffic.sh` sends one random architecture question to the orchestrator; run it on a timer (for example every 5 minutes) while an evaluation is scheduled. The judge model deployment and the evaluation itself are set up in the Foundry portal, not in Bicep. The projects' identities get *Cognitive Services OpenAI User* on the `aif-agents-*` account so evaluators can call that judge model.
+
 Talking point: the orchestrator has Deep Agents' built-in *general-purpose* subagent (the `task` tool) turned off, so every step runs in its own loop and shows up in the UI. The specialist is a separate workload with its own identity, token budget and rights, governed by the gateway.
 
 ## Design notes

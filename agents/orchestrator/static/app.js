@@ -41,6 +41,31 @@ $("new-chat").addEventListener("click", () => {
 });
 $("toggle-panel").addEventListener("click", () => $("panel").classList.toggle("open"));
 
+// ---------- theme: follows the system until the toggle is used, then remembered per browser ----------
+$("theme-toggle").addEventListener("click", () => {
+  const current = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+  const next = current === "light" ? "dark" : "light";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("theme", next); } catch {}
+});
+
+// ---------- views: chat or gateway map (the composer works in both) ----------
+let view = "chat";
+document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => showView(tab.dataset.view)));
+function showView(name) {
+  view = name;
+  document.querySelectorAll(".tab").forEach((t) => {
+    t.classList.toggle("active", t.dataset.view === name);
+    t.setAttribute("aria-selected", String(t.dataset.view === name));
+  });
+  messagesEl.hidden = name !== "chat";
+  document.body.classList.toggle("map-view", name === "map");
+  $("panel").classList.remove("open");
+  $("gmap").hidden = name !== "map";
+  if (name === "map") GatewayMap.show();
+  else scrollDown();
+}
+
 // ---------- policy knobs (APIM named values, changed through the gateway admin identity) ----------
 const KNOB_TAG = { Model: "model", MCP: "mcp", A2A: "a2a" };
 let knobList = [];
@@ -121,6 +146,7 @@ async function setKnob(knob, value, row) {
     if (!res.ok) throw new Error(data.detail || res.statusText);
     knob.value = data.value;
     knobNote(`${knob.name} = ${data.value} · policies pick it up within seconds`);
+    window.dispatchEvent(new CustomEvent("knobs-changed", { detail: knob }));
   } catch (err) {
     knobNote(err.message, true);
   } finally {
@@ -249,6 +275,7 @@ function addCall(call) {
 // ---------- streaming ----------
 async function send(text) {
   busy = true; sendBtn.disabled = true;
+  $("tab-chat").classList.add("busy");
   $("welcome").hidden = true;
   input.value = ""; autosize();
   addUser(text);
@@ -278,9 +305,11 @@ async function send(text) {
     view.content.insertAdjacentHTML("beforeend", `<div class="error">Connection lost: ${esc(err.message)}</div>`);
   } finally {
     stopSteps(view);
+    GatewayMap.reset();
     view.content.classList.remove("cursor");
     if (!view.text && !view.content.querySelector(".error")) view.content.innerHTML = '<p style="color:var(--muted)">No answer produced.</p>';
     busy = false; sendBtn.disabled = false; input.focus();
+    $("tab-chat").classList.remove("busy");
   }
 }
 
@@ -297,7 +326,8 @@ function handle(view, raw) {
     case "tool": addStep(view, data); break;
     case "result": finishStep(view, data); break;
     case "todos": renderPlan(view, data.todos); break;
-    case "gateway": addCall(data); break;
+    case "gateway-start": GatewayMap.callStart(data); break;
+    case "gateway": addCall(data); GatewayMap.callEnd(data); break;
     case "error":
       view.content.insertAdjacentHTML("beforeend", `<div class="error"><b>${data.status ? "HTTP " + data.status + " · " : ""}Gateway/agent error</b><br>${esc(data.message)}</div>`);
       break;

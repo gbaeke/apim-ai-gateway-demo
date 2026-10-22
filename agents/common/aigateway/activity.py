@@ -44,6 +44,9 @@ def _kind(path: str) -> str:
 
 async def _on_request(request: httpx.Request) -> None:
     request.extensions["gateway_started"] = time.perf_counter()
+    if (sink := _sink.get()) is not None:
+        # In flight: the UI lights up the route until the matching response event arrives.
+        sink({"phase": "start", "callId": id(request), "kind": _kind(request.url.path), "method": request.method, "path": request.url.path})
 
 
 async def _on_response(response: httpx.Response) -> None:
@@ -53,6 +56,7 @@ async def _on_response(response: httpx.Response) -> None:
     request = response.request
     started = request.extensions.get("gateway_started", time.perf_counter())
     event = {
+        "callId": id(request),
         "kind": _kind(request.url.path),
         "method": request.method,
         "path": request.url.path,
